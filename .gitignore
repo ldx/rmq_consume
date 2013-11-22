@@ -1,0 +1,7 @@
+deps/
+ebin/
+rel/*/
+
+/rmq_consume
+
+erl_crash.dump
