@@ -62,7 +62,6 @@ handle_info(#'basic.consume_ok'{}, State) ->
 handle_info({#'basic.deliver'{} = Info, Content}, State) ->
     MTag = Info#'basic.deliver'.delivery_tag,
     {ok, Filename} = maybe_save_file(Content, State, MTag),
-    amqp_channel:cast(State#state.channel, #'basic.ack'{delivery_tag = MTag}),
     N = State#state.n + 1,
     log_progress(State#state.verbosity, N, Filename, Info),
     Timer = update_timer(State#state.timer, State#state.timeout),
@@ -78,6 +77,14 @@ handle_info(Info, State) ->
 
 handle_call(Message, _From, State) ->
     {stop, Message, State}.
+
+handle_cast({ack, Tag}, State) ->
+    amqp_channel:cast(State#state.channel, #'basic.ack'{delivery_tag = Tag}),
+    {noreply, State};
+
+handle_cast({nack, Tag}, State) ->
+    amqp_channel:cast(State#state.channel, #'basic.nack'{delivery_tag = Tag}),
+    {noreply, State};
 
 handle_cast(Message, State) ->
     {stop, Message, State}.
@@ -106,10 +113,16 @@ get_queue(Args) ->
         _ -> list_to_binary(Queue)
     end.
 
+ack(MTag) ->
+    gen_server:cast(?MODULE, {ack, MTag}).
+
+nack(MTag) ->
+    gen_server:cast(?MODULE, {nack, MTag}).
+
 maybe_save_file(Content, State, MTag) ->
     case State#state.nosave of
         true ->
-            {ok, 'n/a'};
+            {ok, undefined};
         false ->
             #'amqp_msg'{props = _, payload = Payload} = Content,
             save_file(State#state.directory, MTag, Payload)
@@ -126,11 +139,13 @@ save_file(Dir, Tag, Suffix, Content) ->
         {ok, File} ->
             ok = file:write(File, Content),
             ok = file:close(File),
+            ack(Tag),
             {ok, Filename};
         {error, eexist} ->
             save_file(Dir, Tag, Suffix + 1, Content);
         {error, Reason} ->
             Error = io_lib:format("error creating ~p: ~p", [Name1, Reason]),
+            nack(Tag),
             {error, Error}
     end.
 
