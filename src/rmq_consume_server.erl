@@ -7,7 +7,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 
--export([start_link/0, start_link/1]).
+-export([start_link/0, start_link/1, ack/2, nack/2]).
 
 -record(state, {directory, channel, tag, connection, n, timer, timeout,
                 verbosity, nosave}).
@@ -21,6 +21,12 @@ start_link() ->
 
 start_link(Args) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
+
+ack(MTag, Multiple) ->
+    gen_server:cast(?MODULE, {ack, MTag, Multiple}).
+
+nack(MTag, Multiple) ->
+    gen_server:cast(?MODULE, {nack, MTag, Multiple}).
 
 %% ===================================================================
 %% Callbacks
@@ -78,12 +84,14 @@ handle_info(Info, State) ->
 handle_call(Message, _From, State) ->
     {stop, Message, State}.
 
-handle_cast({ack, Tag}, State) ->
-    amqp_channel:cast(State#state.channel, #'basic.ack'{delivery_tag = Tag}),
+handle_cast({ack, Tag, Multi}, State) ->
+    amqp_channel:cast(State#state.channel, #'basic.ack'{delivery_tag = Tag,
+                                                        multiple = Multi}),
     {noreply, State};
 
-handle_cast({nack, Tag}, State) ->
-    amqp_channel:cast(State#state.channel, #'basic.nack'{delivery_tag = Tag}),
+handle_cast({nack, Tag, Multi}, State) ->
+    amqp_channel:cast(State#state.channel, #'basic.nack'{delivery_tag = Tag,
+                                                         multiple = Multi}),
     {noreply, State};
 
 handle_cast(Message, State) ->
@@ -113,12 +121,6 @@ get_queue(Args) ->
         _ -> list_to_binary(Queue)
     end.
 
-ack(MTag) ->
-    gen_server:cast(?MODULE, {ack, MTag}).
-
-nack(MTag) ->
-    gen_server:cast(?MODULE, {nack, MTag}).
-
 maybe_save_file(Content, State, MTag) ->
     case State#state.nosave of
         true ->
@@ -139,13 +141,13 @@ save_file(Dir, Tag, Suffix, Content) ->
         {ok, File} ->
             ok = file:write(File, Content),
             ok = file:close(File),
-            ack(Tag),
+            ack(Tag, false),
             {ok, Filename};
         {error, eexist} ->
             save_file(Dir, Tag, Suffix + 1, Content);
         {error, Reason} ->
             Error = io_lib:format("error creating ~p: ~p", [Name1, Reason]),
-            nack(Tag),
+            nack(Tag, false),
             {error, Error}
     end.
 
