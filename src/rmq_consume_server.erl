@@ -61,7 +61,7 @@ handle_info(#'basic.consume_ok'{}, State) ->
 
 handle_info({#'basic.deliver'{} = Info, Content}, State) ->
     MTag = Info#'basic.deliver'.delivery_tag,
-    {ok, Filename} = handle_nosave_opt(Content, State, MTag),
+    {ok, Filename} = maybe_save_file(Content, State, MTag),
     amqp_channel:cast(State#state.channel, #'basic.ack'{delivery_tag = MTag}),
     N = State#state.n + 1,
     log_progress(State#state.verbosity, N, Filename, Info),
@@ -75,15 +75,6 @@ handle_info({'DOWN', _Ref, process, Channel, Info}, State)
 
 handle_info(Info, State) ->
     {stop, Info, State}.
-
-handle_nosave_opt(Content, State, MTag) ->
-    case State#state.nosave of
-        true ->
-            {ok, 'n/a'};
-        false ->
-            #'amqp_msg'{props = _, payload = Payload} = Content,
-            save_file(State#state.directory, MTag, Payload)
-    end.
 
 handle_call(Message, _From, State) ->
     {stop, Message, State}.
@@ -113,6 +104,15 @@ get_queue(Args) ->
     case Queue of
         undefined -> error(no_queue_specified);
         _ -> list_to_binary(Queue)
+    end.
+
+maybe_save_file(Content, State, MTag) ->
+    case State#state.nosave of
+        true ->
+            {ok, 'n/a'};
+        false ->
+            #'amqp_msg'{props = _, payload = Payload} = Content,
+            save_file(State#state.directory, MTag, Payload)
     end.
 
 save_file(Dir, Tag, Suffix, Content) ->
