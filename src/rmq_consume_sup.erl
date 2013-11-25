@@ -27,5 +27,6 @@ start_link(Args) ->
 %% ===================================================================
 
 init(Args) ->
+    TarServer = ?CHILD(tar_server, worker, Args),
     RmqServer = ?CHILD(rmq_consume_server, worker, Args),
-    {ok, { {one_for_one, 5, 10}, [RmqServer]} }.
+    {ok, { {one_for_all, 5, 10}, [TarServer, RmqServer]} }.

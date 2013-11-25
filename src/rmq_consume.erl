@@ -21,6 +21,14 @@ main(Args) ->
       "from queue, in seconds. When no new message has been received for "
       "this amount of time, " ++ ?PROG ++ " exits. 0 means running forever."},
      {prefetch, $p, "prefetch", integer, "Prefetch this number of messages."},
+     {tarball, $b, "tarball", {boolean, false}, "Create tarballs instead of "
+      "individual files."},
+     {suffix, $x, "suffix", {string, "_docs"}, "Tarball name suffix. Only "
+      "used if --tarball is specified."},
+     {limit, $l, "limit", {integer, 5000}, "Maximum number of messages to "
+      "store in one tarball archive. Only used if --tarball is specified."},
+     {extension, $e, "extension", {string, ".txt"}, "Extension for filenames "
+      "in tarball archive. Only used if --tarball is specified."},
      {help, $h, "help", undefined, "Show usage info."},
      {version, $v, "version", undefined, "Show version info."},
      {nosave, $n, "nosave", {boolean, false}, "Do not save consumed messages "

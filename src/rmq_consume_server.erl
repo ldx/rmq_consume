@@ -10,7 +10,7 @@
 -export([start_link/0, start_link/1, ack/2, nack/2]).
 
 -record(state, {directory, channel, tag, connection, n, timer, timeout,
-                verbosity, nosave}).
+                verbosity, send}).
 
 %% ===================================================================
 %% API
@@ -39,6 +39,7 @@ init(Args) ->
     Verbosity = proplists:get_value(verbose, Args, 0),
     Prefetch = proplists:get_value(prefetch, Args),
     Nosave = proplists:get_value(nosave, Args),
+    Tarball = proplists:get_value(tarball, Args, false),
     {ok, Connection} = amqp_connection:start(get_amqp_params(Args)),
     {ok, Channel} = amqp_connection:open_channel(Connection),
     monitor(process, Channel),
@@ -52,11 +53,16 @@ init(Args) ->
             #'basic.qos_ok'{} = amqp_channel:call(
                     Channel, #'basic.qos'{prefetch_count = Prefetch})
     end,
-    Timer = update_timer(no_timer, Timeout),
+    FinalTimeout = case Tarball of
+                       true -> 0;
+                       false -> Timeout
+                   end,
+    Send = create_send(Nosave, Tarball),
+    Timer = update_timer(no_timer, FinalTimeout),
     {ok, #state{directory = Directory, channel = Channel, tag = Tag,
                 connection = Connection, n = 0, timer = Timer,
-                timeout = Timeout, verbosity = Verbosity,
-                nosave = Nosave}}.
+                timeout = FinalTimeout, verbosity = Verbosity,
+                send = Send}}.
 
 handle_info({timeout}, State) ->
     spawn(fun() -> application:stop(rmq_consume) end),
@@ -67,9 +73,11 @@ handle_info(#'basic.consume_ok'{}, State) ->
 
 handle_info({#'basic.deliver'{} = Info, Content}, State) ->
     MTag = Info#'basic.deliver'.delivery_tag,
-    {ok, Filename} = maybe_save_file(Content, State, MTag),
+    #'amqp_msg'{props = _, payload = Payload} = Content,
+    Send = State#state.send,
+    ok = Send(State, MTag, Payload),
     N = State#state.n + 1,
-    log_progress(State#state.verbosity, N, Filename, Info),
+    log_progress(State#state.verbosity, N, Info),
     Timer = update_timer(State#state.timer, State#state.timeout),
     {noreply, State#state{n = N, timer = Timer}};
 
@@ -121,15 +129,6 @@ get_queue(Args) ->
         _ -> list_to_binary(Queue)
     end.
 
-maybe_save_file(Content, State, MTag) ->
-    case State#state.nosave of
-        true ->
-            {ok, undefined};
-        false ->
-            #'amqp_msg'{props = _, payload = Payload} = Content,
-            save_file(State#state.directory, MTag, Payload)
-    end.
-
 save_file(Dir, Tag, Suffix, Content) ->
     Name = integer_to_list(Tag),
     Name1 = case Suffix of
@@ -170,10 +169,29 @@ close(Connection, Channel, CTag) ->
     ok = amqp_channel:close(Channel),
     ok = amqp_connection:close(Connection).
 
-log_progress(Verbosity, N, Filename, MsgProps) ->
+log_progress(Verbosity, N, MsgProps) ->
     case Verbosity of
         X when X >= 1, is_integer(X) ->
-            io:format("~p <- ~p~n", [Filename, MsgProps]);
+            io:format("~p~n", [MsgProps]);
         _ ->
             io:format("consumed ~B messages\r", [N])
+    end.
+
+create_send(Nosave, Tarball) ->
+    case {Nosave, Tarball} of
+        {true, _} ->
+            fun(_St, Mt, _Co) ->
+                    ack(Mt, false),
+                    ok
+            end;
+        {false, true} ->
+            fun(_St, Mt, Pl) ->
+                    tar_server:send_document(Mt, Pl),
+                    ok
+            end;
+        {false, false} ->
+            fun(St, Mt, Pl) ->
+                    {ok, _FileName} = save_file(St#state.directory, Mt, Pl),
+                    ok
+            end
     end.
