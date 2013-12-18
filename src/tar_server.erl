@@ -74,7 +74,7 @@ handle_call(Message, _From, State) ->
 
 handle_cast({document, Body, Tag}, State) ->
     NewMessageList = maybe_create_tar(State#state.directory,
-                                      State#state.messages ++ [{Body, Tag}],
+                                      [{Body, Tag}|State#state.messages],
                                       State#state.suffix,
                                       State#state.extension,
                                       State#state.limit),
