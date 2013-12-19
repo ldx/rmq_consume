@@ -37,9 +37,16 @@ init(Args) ->
     Directory = proplists:get_value(directory, Args),
     Timeout = proplists:get_value(timeout, Args) * 1000,
     Verbosity = proplists:get_value(verbose, Args, 0),
-    Prefetch = proplists:get_value(prefetch, Args),
+    Prefetch0 = proplists:get_value(prefetch, Args),
     Nosave = proplists:get_value(nosave, Args),
     Tarball = proplists:get_value(tarball, Args, false),
+    Limit = proplists:get_value(limit, Args, 0),
+    Prefetch = if Tarball =:= true, Prefetch0 < Limit ->
+                    io:format("prefetch < tarball size limit, bumping it~n"),
+                    Limit;
+                true ->
+                    Prefetch0
+             end,
     {ok, Connection} = amqp_connection:start(get_amqp_params(Args)),
     {ok, Channel} = amqp_connection:open_channel(Connection),
     monitor(process, Channel),
