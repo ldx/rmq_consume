@@ -1,6 +1,6 @@
 {application, rmq_consume,
  [
-  {description, ""},
+  {description, "RabbitMQ consumer that can save/archive messages to disk."},
   {vsn, "0.3.0-dev"},
   {registered, []},
   {applications, [
