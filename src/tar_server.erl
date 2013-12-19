@@ -57,17 +57,19 @@ handle_info({timeout}, State) ->
            Timer = update_timer(no_timer, 1000),
            {noreply, State#state{timer = Timer}};
        State#state.workers =< 0 ->
-           io:format("~ntimeout waiting for documents"),
            case length(State#state.messages) of
-               0 -> spawn(fun() -> application:stop(rmq_consume) end),
+               0 -> io:format("~ntimeout waiting for documents"),
+                    rmq_consume_server:stop(),
                     {noreply, State#state{timer = no_timer}};
                _ -> spawn_link(fun() -> create_tar(State#state.directory,
                                                    State#state.messages,
                                                    State#state.suffix,
-                                                   State#state.extension),
-                                        application:stop(rmq_consume)
+                                                   State#state.extension)
                                end),
-                    {noreply, State#state{timer = no_timer, messages = []}}
+                    Workers = State#state.workers + 1,
+                    Timer = update_timer(no_timer, 1000),
+                    {noreply, State#state{timer = Timer, messages = [],
+                                          workers = Workers}}
            end
     end;
 

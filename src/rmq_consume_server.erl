@@ -7,7 +7,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 
--export([start_link/0, start_link/1, ack/2, nack/2]).
+-export([start_link/0, start_link/1, ack/2, nack/2, stop/0]).
 
 -record(state, {directory, channel, tag, connection, n, timer, timeout,
                 verbosity, send}).
@@ -27,6 +27,9 @@ ack(MTag, Multiple) ->
 
 nack(MTag, Multiple) ->
     gen_server:cast(?MODULE, {nack, MTag, Multiple}).
+
+stop() ->
+    gen_server:cast(?MODULE, shutdown).
 
 %% ===================================================================
 %% Callbacks
@@ -108,6 +111,10 @@ handle_cast({nack, Tag, Multi}, State) ->
     amqp_channel:cast(State#state.channel, #'basic.nack'{delivery_tag = Tag,
                                                          multiple = Multi}),
     {noreply, State};
+
+handle_cast(shutdown, State) ->
+    spawn(fun() -> application:stop(rmq_consume) end),
+    {stop, shutdown, State};
 
 handle_cast(Message, State) ->
     {stop, Message, State}.
