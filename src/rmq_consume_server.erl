@@ -113,7 +113,7 @@ handle_cast(Message, State) ->
     {stop, Message, State}.
 
 terminate(Reason, State) ->
-    io:format("~nterminating: ~p~n", [Reason]),
+    io:format("~nconsumer server terminating, reason: ~p~n", [Reason]),
     close(State#state.connection, State#state.channel, State#state.tag),
     ok.
 

@@ -102,7 +102,7 @@ handle_cast(_Message, State) ->
     {noreply, State}.
 
 terminate(Reason, _State) ->
-    io:format("terminating, reason: ~w~n", [Reason]),
+    io:format("tar server terminating, reason: ~w~n", [Reason]),
     ok.
 
 code_change(_OldVersion, State, _Extra) ->
