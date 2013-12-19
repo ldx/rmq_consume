@@ -10,7 +10,7 @@
 -export([start_link/0, start_link/1, send_document/2, ack/1]).
 
 -record(state, {directory, limit, suffix, extension, messages, timer,
-                timeout, ready}).
+                timeout, ready, workers}).
 
 %% ===================================================================
 %% API
@@ -33,6 +33,7 @@ ack(Tags) ->
 %% ===================================================================
 
 init(Args) ->
+    process_flag(trap_exit, true),
     Dir = proplists:get_value(directory, Args),
     Limit = proplists:get_value(limit, Args),
     Suffix = proplists:get_value(suffix, Args),
@@ -49,22 +50,29 @@ init(Args) ->
                 end,
     {ok, #state{directory = Dir, limit = Limit, suffix = Suffix,
                 extension = Extension, messages = [], timer = no_timer,
-                timeout = TimeoutMs, ready = []}}.
+                timeout = TimeoutMs, ready = [], workers = 0}}.
 
 handle_info({timeout}, State) ->
-    io:format("~ntimeout waiting for documents"),
-    NewState = case length(State#state.messages) of
-                   0 -> spawn(fun() -> application:stop(rmq_consume) end),
-                        State#state{timer = no_timer};
-                   _ -> spawn_link(fun() -> create_tar(State#state.directory,
-                                                       State#state.messages,
-                                                       State#state.suffix,
-                                                       State#state.extension),
-                                            application:stop(rmq_consume)
-                                   end),
-                        State#state{timer = no_timer, messages = []}
-               end,
-    {noreply, NewState};
+    if State#state.workers > 0 ->
+           Timer = update_timer(no_timer, 1000),
+           {noreply, State#state{timer = Timer}};
+       State#state.workers =< 0 ->
+           io:format("~ntimeout waiting for documents"),
+           case length(State#state.messages) of
+               0 -> spawn(fun() -> application:stop(rmq_consume) end),
+                    {noreply, State#state{timer = no_timer}};
+               _ -> spawn_link(fun() -> create_tar(State#state.directory,
+                                                   State#state.messages,
+                                                   State#state.suffix,
+                                                   State#state.extension),
+                                        application:stop(rmq_consume)
+                               end),
+                    {noreply, State#state{timer = no_timer, messages = []}}
+           end
+    end;
+
+handle_info({'EXIT', _Pid, normal}, State) ->
+    {noreply, State#state{workers = State#state.workers - 1}};
 
 handle_info(_, State) ->
     {noreply, State}.
@@ -73,13 +81,17 @@ handle_call(Message, _From, State) ->
     {stop, Message, State}.
 
 handle_cast({document, Body, Tag}, State) ->
-    NewMessageList = maybe_create_tar(State#state.directory,
-                                      [{Body, Tag}|State#state.messages],
-                                      State#state.suffix,
-                                      State#state.extension,
-                                      State#state.limit),
+    {Msgs, NewWorker} = maybe_create_tar(State#state.directory,
+                                         [{Body, Tag}|State#state.messages],
+                                         State#state.suffix,
+                                         State#state.extension,
+                                         State#state.limit),
+    Workers = case NewWorker of
+                  true -> State#state.workers + 1;
+                  false -> State#state.workers
+              end,
     Timer = update_timer(State#state.timer, State#state.timeout),
-    {noreply, State#state{messages = NewMessageList, timer = Timer,
+    {noreply, State#state{messages = Msgs, timer = Timer, workers = Workers,
                           ready = [{Tag, false}|State#state.ready]}};
 
 handle_cast({ack, Acks}, State) ->
@@ -136,9 +148,10 @@ maybe_create_tar(Directory, Documents, Suffix, Ext, Limit) ->
     case length(Documents) of
         Limit ->
             spawn_link(fun() -> create_tar(Directory, Documents, Suffix, Ext)
-                       end), [];
+                       end),
+            {[], true};
         _ ->
-            Documents
+            {Documents, false}
     end.
 
 send_ack(Tag) ->
